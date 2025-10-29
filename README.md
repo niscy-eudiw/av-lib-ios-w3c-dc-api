@@ -19,7 +19,8 @@ This library enables iOS applications to participate in online mobile document (
 ```swift
 @main
 struct ProviderExtension: IdentityDocumentProvider {
-	let dcApiHandler = DcApiHandler(serviceName: "myService", accessGroup: "AppStoreTeamID.groupName")
+	let dcApiHandler = DcApiHandler(serviceName: "myService", 
+	accessGroup: "AppStoreTeamID.groupName")
 	
 	var body: some IdentityDocumentRequestScene {
 		ISO18013MobileDocumentRequestScene { context in
@@ -58,7 +59,8 @@ struct RequestAuthorizationView: View {
 								Text(ns).font(.title2)
 								let elements = Array(rs.namespaces[ns]!.keys)
 								ForEach(elements, id: \.self) { el in
-									Text(el).fontWeight(rs.namespaces[ns]![el]!.isRetaining ? .bold : .thin)
+									Text(el).fontWeight(
+										rs.namespaces[ns]![el]!.isRetaining ? .bold : .thin)
 								}
 							}
 						}
@@ -80,14 +82,16 @@ struct RequestAuthorizationView: View {
 					}
 				}
 			} else {
-				ContentUnavailableView("Cannot validate request", image: "externaldrive.fill.trianglebadge.exclamationmark")
+				ContentUnavailableView("Cannot validate request", 
+				image: "externaldrive.fill.trianglebadge.exclamationmark")
 			}
 		}.padding() // vstack
 		.task {
 			do {
 				let (set, _, rn) = try await dcApiHandler.validateRequest(context.request)
 				requestSet = set
-				websiteName = context.requestingWebsiteOrigin?.absoluteString ?? rn ?? "Website name not available"
+				websiteName = context.requestingWebsiteOrigin?.absoluteString ?? rn ?? 
+				"Website name not available"
 			} catch {
 				errorMessage = String(describing: error)
 			}
@@ -99,7 +103,9 @@ struct RequestAuthorizationView: View {
 			try await dcApiHandler.validateConsistency(request: context.request, rawRequest: rawRequest)
 			// validate the signatures
 			try await dcApiHandler.validateRawRequest(rawRequest: rawRequest)
-			let responseData = try await dcApiHandler.buildAndEncryptResponse(request: context.request, rawRequest: rawRequest, originUrl: context.requestingWebsiteOrigin?.absoluteString)
+			let responseData = try await dcApiHandler.buildAndEncryptResponse(
+				request: context.request, rawRequest: rawRequest,
+				originUrl: context.requestingWebsiteOrigin?.absoluteString)
 			return ISO18013MobileDocumentResponse(responseData: responseData)
 		}
 	}

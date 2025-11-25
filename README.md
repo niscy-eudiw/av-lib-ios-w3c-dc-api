@@ -129,3 +129,12 @@ struct RequestAuthorizationView: View {
 ## Resources
 - [Verify identity documents on the web - WWDC25 - Videos](https://developer.apple.com/videos/play/wwdc2025/232/)
 - [Requesting a mobile document on the web](https://developer.apple.com/documentation/IdentityDocumentServices/Requesting-a-mobile-document-on-the-web)
+
+## Licenses
+
+| Package Name | Package URL | License |
+|--------------|-------------|---------|
+| swift-log | https://github.com/apple/swift-log.git | Apache-2.0 License |
+| eudi-lib-ios-iso18013-data-transfer | https://github.com/eu-digital-identity-wallet/eudi-lib-ios-iso18013-data-transfer.git | Apache-2.0 License |
+| eudi-lib-ios-wallet-storage | https://github.com/eu-digital-identity-wallet/eudi-lib-ios-wallet-storage.git | Apache-2.0 License |
+| SwiftHPKE | https://github.com/leif-ibsen/SwiftHPKE | MIT License |

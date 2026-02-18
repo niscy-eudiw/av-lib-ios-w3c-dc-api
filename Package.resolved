@@ -1,5 +1,5 @@
 {
-  "originHash" : "b98b98e90d25d7e879a58e6471625889f8b5350ece7c1fe21ac55b856a836a15",
+  "originHash" : "d4b366ee6cd60ea3c781737964acd7a707ea6c65bdf3d3356d75fe22acca8f11",
   "pins" : [
     {
       "identity" : "asn1",
@@ -15,8 +15,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/leif-ibsen/BigInt",
       "state" : {
-        "revision" : "afb70a0038bfbba845271b60fa9a58d5840f8017",
-        "version" : "1.21.0"
+        "revision" : "8c6f93aa37504b7b1ba3954335b5548a19fbbd82",
+        "version" : "1.22.0"
       }
     },
     {
@@ -60,8 +60,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/eu-digital-identity-wallet/eudi-lib-ios-wallet-storage.git",
       "state" : {
-        "revision" : "1039fb3e624f9cbf7925d3424b2b624b067b0d00",
-        "version" : "0.8.3"
+        "revision" : "27c0e858b4de1a0f71f2c5f266c7a9305b9e4c22",
+        "version" : "0.8.4"
       }
     },
     {
@@ -105,8 +105,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/apple/swift-log.git",
       "state" : {
-        "revision" : "2778fd4e5a12a8aaa30a3ee8285f4ce54c5f3181",
-        "version" : "1.9.1"
+        "revision" : "bbd81b6725ae874c69e9b8c8804d462356b55523",
+        "version" : "1.10.1"
       }
     },
     {

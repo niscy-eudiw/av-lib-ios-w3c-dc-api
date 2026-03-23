@@ -69,7 +69,7 @@ public class DcApiHandler {
 		guard case let .array(eiArr) = eiCbor, eiArr.count == 2, case let .map(eiMap) = eiArr[1], case let .map(recPK) = eiMap["recipientPublicKey"], case let .unsignedInt(crv) = recPK[-1], crv == 1, case .unsignedInt(_) = recPK[1], case let .byteString(bx) = recPK[-2], case let .byteString(by) = recPK[-3] else { throw MdocHelpers.makeError(code: .sessionEncryptionNotInitialized) }
 		// create input structures
 		let idsToDocData = documents.compactMap { $0.getDataForTransfer() }
-		let docTypeToIds = Dictionary(grouping: documents, by: { d in d.docType ?? ""}).mapValues { $0.first!.id }
+        let docTypeToIds = Dictionary(grouping: documents, by: { d in d.docType}).mapValues { $0.first!.id }
 		var docKeyInfos = Dictionary(uniqueKeysWithValues: idsToDocData.map(\.docKeyInfo))
 		var docData = Dictionary(uniqueKeysWithValues: idsToDocData.map(\.doc))
 		var documentKeyIndexes = docData.mapValues { _ in 0 }

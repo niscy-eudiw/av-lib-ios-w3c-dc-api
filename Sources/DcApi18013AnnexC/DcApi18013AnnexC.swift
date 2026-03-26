@@ -25,8 +25,7 @@ import CryptoKit
 import X509
 import SwiftHPKE
 
-@MainActor
-public class DcApiHandler {
+public actor DcApiHandler {
 	let storage: KeyChainStorageService
 	var documents: [WalletStorage.Document] = []
 	
@@ -47,8 +46,8 @@ public class DcApiHandler {
 			kid = Array(aki.keyIdentifier ?? [])
 		}
 		guard let docs = try? await storage.loadDocuments(status: .issued) else { throw MdocHelpers.makeError(code: .documents_not_provided) }
-		documents = docs
-		let docTypes = docs.compactMap(\.docType)
+		documents = docs.filter { $0.docDataFormat == .cbor }
+		let docTypes = documents.compactMap(\.docType)
 		let reqFind: (ISO18013MobileDocumentRequest.DocumentRequestSet) -> Bool = { $0.requests.allSatisfy({dr in docTypes.contains(dr.documentType)}) }
 		let drFind: ([ISO18013MobileDocumentRequest.DocumentRequestSet]) -> ISO18013MobileDocumentRequest.DocumentRequestSet? = { drs in drs.first(where: reqFind) }
 		let prSet = request.presentmentRequests.filter({ pr in pr.isMandatory && drFind(pr.documentRequestSets) != nil })
@@ -137,7 +136,7 @@ public class DcApiHandler {
 		}
 	}
 
-	class func hpkeEncrypt(receiverPublicKeyRepresentation: Data, plainText: Data, info: Data) -> [Data] {
+	static func hpkeEncrypt(receiverPublicKeyRepresentation: Data, plainText: Data, info: Data) -> [Data] {
 		let receiverKey = try! P256.KeyAgreement.PublicKey(rawRepresentation: receiverPublicKeyRepresentation)
 		let recipientPublicKey = try! PublicKey(der: Bytes(receiverKey.derRepresentation))
 		let theSuite = CipherSuite(kem: .P256, kdf: .KDF256, aead: .AESGCM128)
@@ -145,7 +144,7 @@ public class DcApiHandler {
 		return [Data(enc), Data(cipherText)]
 	}
 	
-	public class func sha256(data: Data) -> Data {
+	public static func sha256(data: Data) -> Data {
 			let hashed = SHA256.hash(data: data)
 			return Data(hashed)
 	}

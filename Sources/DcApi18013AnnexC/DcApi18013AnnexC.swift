@@ -25,7 +25,7 @@ import CryptoKit
 import X509
 import SwiftHPKE
 
-public class DcApiHandler {
+public actor DcApiHandler {
 	let storage: KeyChainStorageService
 	var documents: [WalletStorage.Document] = []
 	
@@ -46,8 +46,8 @@ public class DcApiHandler {
 			kid = Array(aki.keyIdentifier ?? [])
 		}
 		guard let docs = try? await storage.loadDocuments(status: .issued) else { throw MdocHelpers.makeError(code: .documents_not_provided) }
-		documents = docs
-		let docTypes = docs.compactMap(\.docType)
+		documents = docs.filter { $0.docDataFormat == .cbor }
+		let docTypes = documents.compactMap(\.docType)
 		let reqFind: (ISO18013MobileDocumentRequest.DocumentRequestSet) -> Bool = { $0.requests.allSatisfy({dr in docTypes.contains(dr.documentType)}) }
 		let drFind: ([ISO18013MobileDocumentRequest.DocumentRequestSet]) -> ISO18013MobileDocumentRequest.DocumentRequestSet? = { drs in drs.first(where: reqFind) }
 		let prSet = request.presentmentRequests.filter({ pr in pr.isMandatory && drFind(pr.documentRequestSets) != nil })
@@ -61,14 +61,14 @@ public class DcApiHandler {
 	public func validateRawRequest(rawRequest: IdentityDocumentWebPresentmentRawRequest) async throws {
 	}
 	
-	public func buildAndEncryptResponse(request: ISO18013MobileDocumentRequest, rawRequest: IdentityDocumentWebPresentmentRawRequest, originUrl: String?) async throws -> Data {
+    public func buildAndEncryptResponse(request: ISO18013MobileDocumentRequest, rawRequest: IdentityDocumentWebPresentmentRawRequest, originUrl: String?, zkSystemRepository: ZkSystemRepository? = nil) async throws -> Data {
 		guard let originUrl, let jsonRequest = try? JSONSerialization.jsonObject(with: rawRequest.requestData) as? [String: String], let dReqBase64Url = jsonRequest["deviceRequest"], let deviceRequestData = Data(base64urlEncoded: dReqBase64Url),
 			let eiBase64Url = jsonRequest["encryptionInfo"], let eiData = Data(base64urlEncoded: eiBase64Url), let eiCbor = try? CBOR.decode([UInt8](eiData)) else { throw MdocHelpers.makeError(code: .requestDecodeError) }
 		let deviceReq = try DeviceRequest(data: [UInt8](deviceRequestData))
 		guard case let .array(eiArr) = eiCbor, eiArr.count == 2, case let .map(eiMap) = eiArr[1], case let .map(recPK) = eiMap["recipientPublicKey"], case let .unsignedInt(crv) = recPK[-1], crv == 1, case .unsignedInt(_) = recPK[1], case let .byteString(bx) = recPK[-2], case let .byteString(by) = recPK[-3] else { throw MdocHelpers.makeError(code: .sessionEncryptionNotInitialized) }
 		// create input structures
 		let idsToDocData = documents.compactMap { $0.getDataForTransfer() }
-		let docTypeToIds = Dictionary(grouping: documents, by: { d in d.docType ?? ""}).mapValues { $0.first!.id }
+        let docTypeToIds = Dictionary(grouping: documents, by: { d in d.docType}).mapValues { $0.first!.id }
 		var docKeyInfos = Dictionary(uniqueKeysWithValues: idsToDocData.map(\.docKeyInfo))
 		var docData = Dictionary(uniqueKeysWithValues: idsToDocData.map(\.doc))
 		var documentKeyIndexes = docData.mapValues { _ in 0 }
@@ -92,10 +92,10 @@ public class DcApiHandler {
 		let dcapiInfoHash = Self.sha256(data: Data(dcapiInfo.encode()))
 		let dcApiHandoverCbor = CBOR.array([.utf8String("dcapi"), .byteString(dcapiInfoHash.bytes)])
 		let sessionTranscript = SessionTranscript(handOver: dcApiHandoverCbor)
-		let resp1 = try await MdocHelpers.getDeviceResponseToSend(deviceRequest: deviceReq, issuerSigned: issuerSigned, docMetadata: docMetadata, selectedItems: nil, privateKeyObjects: privateKeyObjects, sessionTranscript: sessionTranscript, dauthMethod: .deviceSignature, unlockData: [:])
+        let resp1 = try await MdocHelpers.getDeviceResponseToSend(deviceRequest: deviceReq, issuerSigned: issuerSigned, docMetadata: docMetadata, selectedItems: nil, privateKeyObjects: privateKeyObjects, sessionTranscript: sessionTranscript, dauthMethod: .deviceSignature, unlockData: [:], zkSystemRepository: zkSystemRepository)
 		let selectedItems1 = resp1?.validRequestItems ?? [:]
 		let selectedItems = Dictionary(uniqueKeysWithValues: selectedItems1.compactMap { (key: String, value: [NameSpace : [RequestItem]]) -> (String, [NameSpace : [RequestItem]])? in	if let id = docTypeToIds[key] { (id, value) } else { nil }	})
-		let resp = try await MdocHelpers.getDeviceResponseToSend(deviceRequest: deviceReq, issuerSigned: issuerSigned, docMetadata: docMetadata, selectedItems: selectedItems, privateKeyObjects: privateKeyObjects, sessionTranscript: sessionTranscript, dauthMethod: .deviceSignature, unlockData: [:])
+		let resp = try await MdocHelpers.getDeviceResponseToSend(deviceRequest: deviceReq, issuerSigned: issuerSigned, docMetadata: docMetadata, selectedItems: selectedItems, privateKeyObjects: privateKeyObjects, sessionTranscript: sessionTranscript, dauthMethod: .deviceSignature, unlockData: [:], zkSystemRepository: zkSystemRepository)
 		guard let resp else { throw MdocHelpers.makeError(code: .noDocumentToReturn) }
 		// Update key batch info for presented documents to decrement one-time-use count
 		try await updateKeyBatchInfoForPresentedDocuments(
@@ -136,7 +136,7 @@ public class DcApiHandler {
 		}
 	}
 
-	class func hpkeEncrypt(receiverPublicKeyRepresentation: Data, plainText: Data, info: Data) -> [Data] {
+	static func hpkeEncrypt(receiverPublicKeyRepresentation: Data, plainText: Data, info: Data) -> [Data] {
 		let receiverKey = try! P256.KeyAgreement.PublicKey(rawRepresentation: receiverPublicKeyRepresentation)
 		let recipientPublicKey = try! PublicKey(der: Bytes(receiverKey.derRepresentation))
 		let theSuite = CipherSuite(kem: .P256, kdf: .KDF256, aead: .AESGCM128)
@@ -144,7 +144,7 @@ public class DcApiHandler {
 		return [Data(enc), Data(cipherText)]
 	}
 	
-	public class func sha256(data: Data) -> Data {
+	public static func sha256(data: Data) -> Data {
 			let hashed = SHA256.hash(data: data)
 			return Data(hashed)
 	}

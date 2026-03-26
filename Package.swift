@@ -14,10 +14,9 @@ let package = Package(
 		)
 	],
 	dependencies: [
-		.package(url: "https://github.com/apple/swift-log.git", from: "1.6.3"),
-		.package(url: "https://github.com/eu-digital-identity-wallet/eudi-lib-ios-iso18013-data-transfer.git", from: "0.10.1"),
-		.package(url: "https://github.com/eu-digital-identity-wallet/eudi-lib-ios-wallet-storage.git", from: "0.11.0"),
-        .package(url: "https://github.com/eu-digital-identity-wallet/av-lib-ios-longfellow-zkp.git", from: "0.1.0"),
+		.package(url: "https://github.com/apple/swift-log.git", from: "1.10.1"),
+		.package(url: "https://github.com/eu-digital-identity-wallet/eudi-lib-ios-iso18013-data-transfer.git", from: "0.11.2"),
+		.package(url: "https://github.com/eu-digital-identity-wallet/eudi-lib-ios-wallet-storage.git", from: "0.11.1"),
 		.package(url: "https://github.com/leif-ibsen/SwiftHPKE", from: "2.8.0"),
 	],
 	targets: [
@@ -29,7 +28,6 @@ let package = Package(
 				.product(
 					name: "MdocDataTransfer18013", package: "eudi-lib-ios-iso18013-data-transfer"),
 				.product(name: "WalletStorage", package: "eudi-lib-ios-wallet-storage"),
-                .product(name: "LongfellowZkp", package: "av-lib-ios-longfellow-zkp"),
 				.product(name: "Logging", package: "swift-log"),
 				"SwiftHPKE",
 			]),

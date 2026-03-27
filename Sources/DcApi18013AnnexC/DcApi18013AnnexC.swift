@@ -121,13 +121,13 @@ public actor DcApiHandler {
 				  let dki = DocKeyInfo(from: dkid),
 				  let keyIndex = documentKeyIndexes[id] else { continue }
 			let secureArea = SecureAreaRegistry.shared.get(name: dki.secureAreaName)
-			let newKeyBatchInfo = try await secureArea.updateKeyBatchInfo(id: id, keyIndex: keyIndex)
 			// Delete credential and key if one-time-use policy, but not for ZK documents
 			let docType = documents.first(where: { $0.id == id })?.docType
 			let isZkDocument = docType.map { zkDocTypes.contains($0) } ?? false
-			if newKeyBatchInfo.credentialPolicy == .oneTimeUse && !isZkDocument {
+			if dki.credentialPolicy == .oneTimeUse && !isZkDocument {
 				try await storage.deleteDocumentCredential(id: id, index: keyIndex)
 				try await secureArea.deleteKeyBatch(id: id, startIndex: keyIndex, batchSize: 1)
+				_ = try await secureArea.updateKeyBatchInfo(id: id, keyIndex: keyIndex)
 			}
 		}
 	}

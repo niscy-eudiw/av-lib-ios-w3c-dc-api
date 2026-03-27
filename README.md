@@ -104,7 +104,7 @@ struct RequestAuthorizationView: View {
 			// validate the signatures
 			try await dcApiHandler.validateRawRequest(rawRequest: rawRequest)
 			let responseData = try await dcApiHandler.buildAndEncryptResponse(
-				request: context.request, rawRequest: rawRequest,
+				rawRequest: rawRequest,
 				originUrl: context.requestingWebsiteOrigin?.absoluteString)
 			return ISO18013MobileDocumentResponse(responseData: responseData)
 		}

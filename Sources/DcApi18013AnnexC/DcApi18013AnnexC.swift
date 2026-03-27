@@ -60,8 +60,14 @@ public actor DcApiHandler {
 	
 	public func validateRawRequest(rawRequest: IdentityDocumentWebPresentmentRawRequest) async throws {
 	}
+
+	public func buildAndEncryptResponse(remoteRawRequest: DcApiRequest, zkSystemRepository: ZkSystemRepository?) async throws -> Data {
+		let rawRequest = IdentityDocumentWebPresentmentRawRequest(requestType: .iso18013MobileDocument, requestData: remoteRawRequest.rawRequestData)
+		let originUrl = remoteRawRequest.originUrl
+		return try await buildAndEncryptResponse(rawRequest: rawRequest, originUrl: originUrl, zkSystemRepository: zkSystemRepository)
+	}
 	
-    public func buildAndEncryptResponse(request: ISO18013MobileDocumentRequest, rawRequest: IdentityDocumentWebPresentmentRawRequest, originUrl: String?, zkSystemRepository: ZkSystemRepository? = nil) async throws -> Data {
+    public func buildAndEncryptResponse(rawRequest: IdentityDocumentWebPresentmentRawRequest, originUrl: String?, zkSystemRepository: ZkSystemRepository? = nil) async throws -> Data {
 		guard let originUrl, let jsonRequest = try? JSONSerialization.jsonObject(with: rawRequest.requestData) as? [String: String], let dReqBase64Url = jsonRequest["deviceRequest"], let deviceRequestData = Data(base64urlEncoded: dReqBase64Url),
 			let eiBase64Url = jsonRequest["encryptionInfo"], let eiData = Data(base64urlEncoded: eiBase64Url), let eiCbor = try? CBOR.decode([UInt8](eiData)) else { throw MdocHelpers.makeError(code: .requestDecodeError) }
 		let deviceReq = try DeviceRequest(data: [UInt8](deviceRequestData))

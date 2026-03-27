@@ -16,7 +16,26 @@
 
 import Testing
 @testable import DcApi18013AnnexC
+import Foundation
 
-@Test func example() async throws {
-    // Write your test here and use APIs like `#expect(...)` to check expected conditions.
+@Test func dcApiRequestNSCodingRoundTripWithOriginUrl() throws {
+    let request = DcApiRequest(rawRequestData: Data([0x01, 0x02, 0x03]), originUrl: "https://example.org")
+    let archived = try NSKeyedArchiver.archivedData(withRootObject: request, requiringSecureCoding: true)
+
+    let decodedObject = try NSKeyedUnarchiver.unarchiveTopLevelObjectWithData(archived)
+    let decodedRequest = try #require(decodedObject as? DcApiRequest)
+
+    #expect(decodedRequest.rawRequestData == request.rawRequestData)
+    #expect(decodedRequest.originUrl == request.originUrl)
+}
+
+@Test func dcApiRequestNSCodingRoundTripWithNilOriginUrl() throws {
+    let request = DcApiRequest(rawRequestData: Data([0xAA, 0xBB]), originUrl: nil)
+    let archived = try NSKeyedArchiver.archivedData(withRootObject: request, requiringSecureCoding: false)
+
+    let decodedObject = try NSKeyedUnarchiver.unarchiveTopLevelObjectWithData(archived)
+    let decodedRequest = try #require(decodedObject as? DcApiRequest)
+
+    #expect(decodedRequest.rawRequestData == request.rawRequestData)
+    #expect(decodedRequest.originUrl == nil)
 }

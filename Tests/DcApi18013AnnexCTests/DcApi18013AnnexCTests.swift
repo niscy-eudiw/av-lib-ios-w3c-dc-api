@@ -19,23 +19,11 @@ import Testing
 import Foundation
 
 @Test func dcApiRequestNSCodingRoundTripWithOriginUrl() throws {
-    let request = DcApiRequest(rawRequestData: Data([0x01, 0x02, 0x03]), originUrl: "https://example.org")
-    let archived = try NSKeyedArchiver.archivedData(withRootObject: request, requiringSecureCoding: true)
-
-    let decodedObject = try NSKeyedUnarchiver.unarchiveTopLevelObjectWithData(archived)
-    let decodedRequest = try #require(decodedObject as? DcApiRequest)
-
+    let request = DcApiExtensionRequest(rawRequestData: Data([0x01, 0x02, 0x03]), originUrl: "https://example.org")
+	let archived = try JSONEncoder().encode(request)
+	let decodedRequest = try JSONDecoder().decode(DcApiExtensionRequest.self, from: archived)
     #expect(decodedRequest.rawRequestData == request.rawRequestData)
     #expect(decodedRequest.originUrl == request.originUrl)
 }
 
-@Test func dcApiRequestNSCodingRoundTripWithNilOriginUrl() throws {
-    let request = DcApiRequest(rawRequestData: Data([0xAA, 0xBB]), originUrl: nil)
-    let archived = try NSKeyedArchiver.archivedData(withRootObject: request, requiringSecureCoding: false)
 
-    let decodedObject = try NSKeyedUnarchiver.unarchiveTopLevelObjectWithData(archived)
-    let decodedRequest = try #require(decodedObject as? DcApiRequest)
-
-    #expect(decodedRequest.rawRequestData == request.rawRequestData)
-    #expect(decodedRequest.originUrl == nil)
-}

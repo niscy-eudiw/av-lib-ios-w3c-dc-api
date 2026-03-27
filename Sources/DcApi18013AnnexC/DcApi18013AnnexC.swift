@@ -61,7 +61,7 @@ public actor DcApiHandler {
 	public func validateRawRequest(rawRequest: IdentityDocumentWebPresentmentRawRequest) async throws {
 	}
 
-	public func buildAndEncryptResponse(remoteRawRequest: DcApiRequest, zkSystemRepository: ZkSystemRepository?) async throws -> Data {
+	public func buildAndEncryptResponse(remoteRawRequest: DcApiExtensionRequest, zkSystemRepository: ZkSystemRepository?) async throws -> Data {
 		let rawRequest = IdentityDocumentWebPresentmentRawRequest(requestType: .iso18013MobileDocument, requestData: remoteRawRequest.rawRequestData)
 		let originUrl = remoteRawRequest.originUrl
 		return try await buildAndEncryptResponse(rawRequest: rawRequest, originUrl: originUrl, zkSystemRepository: zkSystemRepository)

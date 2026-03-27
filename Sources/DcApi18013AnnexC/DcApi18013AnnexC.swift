@@ -98,11 +98,7 @@ public actor DcApiHandler {
 		let resp = try await MdocHelpers.getDeviceResponseToSend(deviceRequest: deviceReq, issuerSigned: issuerSigned, docMetadata: docMetadata, selectedItems: selectedItems, privateKeyObjects: privateKeyObjects, sessionTranscript: sessionTranscript, dauthMethod: .deviceSignature, unlockData: [:], zkSystemRepository: zkSystemRepository)
 		guard let resp else { throw MdocHelpers.makeError(code: .noDocumentToReturn) }
 		// Update key batch info for presented documents to decrement one-time-use count
-		try await updateKeyBatchInfoForPresentedDocuments(
-			presentedIds: Array(selectedItems.keys),
-			docKeyInfos: docKeyInfos,
-			documentKeyIndexes: documentKeyIndexes
-		)
+		try await updateKeyBatchInfoForPresentedDocuments(presentedIds: Array(selectedItems.keys), docKeyInfos: docKeyInfos, documentKeyIndexes: documentKeyIndexes, deviceResponse: resp.deviceResponse)
 		// Create the Sender instance and encrypt
 		let plainText = resp.deviceResponse.encode(options: CBOROptions())
 		let sessionTranscriptEncoded = sessionTranscript.encode(options: CBOROptions()) 
@@ -117,19 +113,19 @@ public actor DcApiHandler {
 	///   - presentedIds: Array of document IDs that were presented
 	///   - docKeyInfos: Dictionary mapping document IDs to their key info data
 	///   - documentKeyIndexes: Dictionary mapping document IDs to the key index used for presentation
-	private func updateKeyBatchInfoForPresentedDocuments(
-		presentedIds: [String],
-		docKeyInfos: [String: Data?],
-		documentKeyIndexes: [String: Int]
-	) async throws {
+	///  - deviceResponse: The DeviceResponse sent to the device, used to determine if the credential policy is one-time-use
+	private func updateKeyBatchInfoForPresentedDocuments(presentedIds: [String], docKeyInfos: [String: Data?], documentKeyIndexes: [String: Int], deviceResponse: DeviceResponse) async throws {
+		let zkDocTypes = Set(deviceResponse.zkDocuments?.map(\.documentData.docType) ?? [])
 		for id in presentedIds {
 			guard let docKeyInfoData = docKeyInfos[id], let dkid = docKeyInfoData,
 				  let dki = DocKeyInfo(from: dkid),
 				  let keyIndex = documentKeyIndexes[id] else { continue }
 			let secureArea = SecureAreaRegistry.shared.get(name: dki.secureAreaName)
 			let newKeyBatchInfo = try await secureArea.updateKeyBatchInfo(id: id, keyIndex: keyIndex)
-			// Delete credential and key if one-time-use policy
-			if newKeyBatchInfo.credentialPolicy == .oneTimeUse {
+			// Delete credential and key if one-time-use policy, but not for ZK documents
+			let docType = documents.first(where: { $0.id == id })?.docType
+			let isZkDocument = docType.map { zkDocTypes.contains($0) } ?? false
+			if newKeyBatchInfo.credentialPolicy == .oneTimeUse && !isZkDocument {
 				try await storage.deleteDocumentCredential(id: id, index: keyIndex)
 				try await secureArea.deleteKeyBatch(id: id, startIndex: keyIndex, batchSize: 1)
 			}

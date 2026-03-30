@@ -18,21 +18,26 @@ import Foundation
 import MdocDataModel18013
 import SwiftCBOR
 
-/// can be used to send request for processing to other app or web service
+/// Structused to send request for processing to main app or web service
+
+/// Currently the identity provider extension cannot serve requests containing zk-system-specs due to memory constraints, so we need to send such requests to main app for processing
 public struct DcApiExtensionRequest: Sendable, Codable {
 	public var rawRequestData: Data
 	public var originUrl: String?
-
-	public init(rawRequestData: Data, originUrl: String?) {
-		self.rawRequestData = rawRequestData
-		self.originUrl = originUrl
-	}
 	
 	// need extension request only when it contains zk-system-specs
-	public init?(deviceRequest: DeviceRequest, rawRequestData: Data, originUrl: String?) {
+	public init?(rawRequestData: Data, originUrl: String?) {
+        guard let jsonRequest = try? JSONSerialization.jsonObject(with: rawRequestData) as? [String: String], let dReqBase64Url = jsonRequest["deviceRequest"], let deviceRequestData = Data(base64urlEncoded: dReqBase64Url), let deviceRequest = try? DeviceRequest(data: [UInt8](deviceRequestData)) else { return nil }
 		guard deviceRequest.docRequests
 			.first(where: { $0.itemsRequest.requestInfo?.zkRequest?.systemSpecs != nil }) != nil, originUrl != nil else { return nil }
 		self.rawRequestData = rawRequestData
 		self.originUrl = originUrl
 	}
+}
+
+public enum SharedDefaultKey: String, Sendable {
+    case deviceToken
+    case fcmToken
+    case dcApiRawRequestData
+    case dcApiResponseData
 }

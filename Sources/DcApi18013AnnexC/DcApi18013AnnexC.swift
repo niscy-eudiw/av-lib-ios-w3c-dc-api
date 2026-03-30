@@ -45,8 +45,7 @@ public actor DcApiHandler {
 			rn = (try? cert.extensions.subjectAlternativeNames)?.first?.description ?? cert.subject.description
 			kid = Array(aki.keyIdentifier ?? [])
 		}
-		guard let docs = try? await storage.loadDocuments(status: .issued) else { throw MdocHelpers.makeError(code: .documents_not_provided) }
-		documents = docs.filter { $0.docDataFormat == .cbor }
+		try await loadIssuedCborDocuments()
 		let docTypes = documents.compactMap(\.docType)
 		let reqFind: (ISO18013MobileDocumentRequest.DocumentRequestSet) -> Bool = { $0.requests.allSatisfy({dr in docTypes.contains(dr.documentType)}) }
 		let drFind: ([ISO18013MobileDocumentRequest.DocumentRequestSet]) -> ISO18013MobileDocumentRequest.DocumentRequestSet? = { drs in drs.first(where: reqFind) }
@@ -73,6 +72,7 @@ public actor DcApiHandler {
 		let deviceReq = try DeviceRequest(data: [UInt8](deviceRequestData))
 		guard case let .array(eiArr) = eiCbor, eiArr.count == 2, case let .map(eiMap) = eiArr[1], case let .map(recPK) = eiMap["recipientPublicKey"], case let .unsignedInt(crv) = recPK[-1], crv == 1, case .unsignedInt(_) = recPK[1], case let .byteString(bx) = recPK[-2], case let .byteString(by) = recPK[-3] else { throw MdocHelpers.makeError(code: .sessionEncryptionNotInitialized) }
 		// create input structures
+        if documents.count == 0 { try await loadIssuedCborDocuments() }
 		let idsToDocData = documents.compactMap { $0.getDataForTransfer() }
         let docTypeToIds = Dictionary(grouping: documents, by: { d in d.docType}).mapValues { $0.first!.id }
 		var docKeyInfos = Dictionary(uniqueKeysWithValues: idsToDocData.map(\.docKeyInfo))
@@ -136,6 +136,11 @@ public actor DcApiHandler {
 				_ = try await secureArea.updateKeyBatchInfo(id: id, keyIndex: keyIndex)
 			}
 		}
+	}
+
+	private func loadIssuedCborDocuments() async throws {
+		guard let docs = try? await storage.loadDocuments(status: .issued) else { throw MdocHelpers.makeError(code: .documents_not_provided) }
+		documents = docs.filter { $0.docDataFormat == .cbor }
 	}
 
 	static func hpkeEncrypt(receiverPublicKeyRepresentation: Data, plainText: Data, info: Data) -> [Data] {

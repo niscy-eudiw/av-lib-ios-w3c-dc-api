@@ -16,7 +16,14 @@
 
 import Testing
 @testable import DcApi18013AnnexC
+import Foundation
 
-@Test func example() async throws {
-    // Write your test here and use APIs like `#expect(...)` to check expected conditions.
+@Test func dcApiRequestNSCodingRoundTripWithOriginUrl() throws {
+    let request = DcApiExtensionRequest(rawRequestData: Data([0x01, 0x02, 0x03]), originUrl: "https://example.org")
+	let archived = try JSONEncoder().encode(request)
+	let decodedRequest = try JSONDecoder().decode(DcApiExtensionRequest.self, from: archived)
+    #expect(decodedRequest.rawRequestData == request.rawRequestData)
+    #expect(decodedRequest.originUrl == request.originUrl)
 }
+
+

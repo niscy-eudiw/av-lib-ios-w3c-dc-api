@@ -45,8 +45,7 @@ public actor DcApiHandler {
 			rn = (try? cert.extensions.subjectAlternativeNames)?.first?.description ?? cert.subject.description
 			kid = Array(aki.keyIdentifier ?? [])
 		}
-		guard let docs = try? await storage.loadDocuments(status: .issued) else { throw MdocHelpers.makeError(code: .documents_not_provided) }
-		documents = docs.filter { $0.docDataFormat == .cbor }
+		try await loadIssuedCborDocuments()
 		let docTypes = documents.compactMap(\.docType)
 		let reqFind: (ISO18013MobileDocumentRequest.DocumentRequestSet) -> Bool = { $0.requests.allSatisfy({dr in docTypes.contains(dr.documentType)}) }
 		let drFind: ([ISO18013MobileDocumentRequest.DocumentRequestSet]) -> ISO18013MobileDocumentRequest.DocumentRequestSet? = { drs in drs.first(where: reqFind) }
@@ -60,13 +59,20 @@ public actor DcApiHandler {
 	
 	public func validateRawRequest(rawRequest: IdentityDocumentWebPresentmentRawRequest) async throws {
 	}
+
+	public func buildAndEncryptResponse(remoteRawRequest: DcApiExtensionRequest, zkSystemRepository: ZkSystemRepository?) async throws -> Data {
+		let rawRequest = IdentityDocumentWebPresentmentRawRequest(requestType: .iso18013MobileDocument, requestData: remoteRawRequest.rawRequestData)
+		let originUrl = remoteRawRequest.originUrl
+		return try await buildAndEncryptResponse(rawRequest: rawRequest, originUrl: originUrl, zkSystemRepository: zkSystemRepository)
+	}
 	
-    public func buildAndEncryptResponse(request: ISO18013MobileDocumentRequest, rawRequest: IdentityDocumentWebPresentmentRawRequest, originUrl: String?, zkSystemRepository: ZkSystemRepository? = nil) async throws -> Data {
+    public func buildAndEncryptResponse(rawRequest: IdentityDocumentWebPresentmentRawRequest, originUrl: String?, zkSystemRepository: ZkSystemRepository? = nil) async throws -> Data {
 		guard let originUrl, let jsonRequest = try? JSONSerialization.jsonObject(with: rawRequest.requestData) as? [String: String], let dReqBase64Url = jsonRequest["deviceRequest"], let deviceRequestData = Data(base64urlEncoded: dReqBase64Url),
 			let eiBase64Url = jsonRequest["encryptionInfo"], let eiData = Data(base64urlEncoded: eiBase64Url), let eiCbor = try? CBOR.decode([UInt8](eiData)) else { throw MdocHelpers.makeError(code: .requestDecodeError) }
 		let deviceReq = try DeviceRequest(data: [UInt8](deviceRequestData))
 		guard case let .array(eiArr) = eiCbor, eiArr.count == 2, case let .map(eiMap) = eiArr[1], case let .map(recPK) = eiMap["recipientPublicKey"], case let .unsignedInt(crv) = recPK[-1], crv == 1, case .unsignedInt(_) = recPK[1], case let .byteString(bx) = recPK[-2], case let .byteString(by) = recPK[-3] else { throw MdocHelpers.makeError(code: .sessionEncryptionNotInitialized) }
 		// create input structures
+        if documents.count == 0 { try await loadIssuedCborDocuments() }
 		let idsToDocData = documents.compactMap { $0.getDataForTransfer() }
         let docTypeToIds = Dictionary(grouping: documents, by: { d in d.docType}).mapValues { $0.first!.id }
 		var docKeyInfos = Dictionary(uniqueKeysWithValues: idsToDocData.map(\.docKeyInfo))
@@ -98,11 +104,7 @@ public actor DcApiHandler {
 		let resp = try await MdocHelpers.getDeviceResponseToSend(deviceRequest: deviceReq, issuerSigned: issuerSigned, docMetadata: docMetadata, selectedItems: selectedItems, privateKeyObjects: privateKeyObjects, sessionTranscript: sessionTranscript, dauthMethod: .deviceSignature, unlockData: [:], zkSystemRepository: zkSystemRepository)
 		guard let resp else { throw MdocHelpers.makeError(code: .noDocumentToReturn) }
 		// Update key batch info for presented documents to decrement one-time-use count
-		try await updateKeyBatchInfoForPresentedDocuments(
-			presentedIds: Array(selectedItems.keys),
-			docKeyInfos: docKeyInfos,
-			documentKeyIndexes: documentKeyIndexes
-		)
+		try await updateKeyBatchInfoForPresentedDocuments(presentedIds: Array(selectedItems.keys), docKeyInfos: docKeyInfos, documentKeyIndexes: documentKeyIndexes, deviceResponse: resp.deviceResponse)
 		// Create the Sender instance and encrypt
 		let plainText = resp.deviceResponse.encode(options: CBOROptions())
 		let sessionTranscriptEncoded = sessionTranscript.encode(options: CBOROptions()) 
@@ -117,23 +119,28 @@ public actor DcApiHandler {
 	///   - presentedIds: Array of document IDs that were presented
 	///   - docKeyInfos: Dictionary mapping document IDs to their key info data
 	///   - documentKeyIndexes: Dictionary mapping document IDs to the key index used for presentation
-	private func updateKeyBatchInfoForPresentedDocuments(
-		presentedIds: [String],
-		docKeyInfos: [String: Data?],
-		documentKeyIndexes: [String: Int]
-	) async throws {
+	///  - deviceResponse: The DeviceResponse sent to the device, used to determine if the credential policy is one-time-use
+	private func updateKeyBatchInfoForPresentedDocuments(presentedIds: [String], docKeyInfos: [String: Data?], documentKeyIndexes: [String: Int], deviceResponse: DeviceResponse) async throws {
+		let zkDocTypes = Set(deviceResponse.zkDocuments?.map(\.documentData.docType) ?? [])
 		for id in presentedIds {
 			guard let docKeyInfoData = docKeyInfos[id], let dkid = docKeyInfoData,
 				  let dki = DocKeyInfo(from: dkid),
 				  let keyIndex = documentKeyIndexes[id] else { continue }
 			let secureArea = SecureAreaRegistry.shared.get(name: dki.secureAreaName)
-			let newKeyBatchInfo = try await secureArea.updateKeyBatchInfo(id: id, keyIndex: keyIndex)
-			// Delete credential and key if one-time-use policy
-			if newKeyBatchInfo.credentialPolicy == .oneTimeUse {
+			// Delete credential and key if one-time-use policy, but not for ZK documents
+			let docType = documents.first(where: { $0.id == id })?.docType
+			let isZkDocument = docType.map { zkDocTypes.contains($0) } ?? false
+			if dki.credentialPolicy == .oneTimeUse && !isZkDocument {
 				try await storage.deleteDocumentCredential(id: id, index: keyIndex)
 				try await secureArea.deleteKeyBatch(id: id, startIndex: keyIndex, batchSize: 1)
+				_ = try await secureArea.updateKeyBatchInfo(id: id, keyIndex: keyIndex)
 			}
 		}
+	}
+
+	private func loadIssuedCborDocuments() async throws {
+		guard let docs = try? await storage.loadDocuments(status: .issued) else { throw MdocHelpers.makeError(code: .documents_not_provided) }
+		documents = docs.filter { $0.docDataFormat == .cbor }
 	}
 
 	static func hpkeEncrypt(receiverPublicKeyRepresentation: Data, plainText: Data, info: Data) -> [Data] {

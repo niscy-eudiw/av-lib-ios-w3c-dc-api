@@ -88,11 +88,7 @@ public actor DcApiHandler {
 		guard idsToDocData.count > 0 else { throw MdocHelpers.makeError(code: .documents_not_provided) }
 		let docMetadata = Dictionary(uniqueKeysWithValues: idsToDocData.map(\.metadata)).compactMapValues {$0}
 		let issuerSigned = try docData.mapValues { try IssuerSigned(data: $0.bytes)}
-		let privateKeyObjects: [String: CoseKeyPrivate] = Dictionary(uniqueKeysWithValues: docKeyInfos.compactMap {
-			guard let dki = DocKeyInfo(from: $0.value) else { return nil }
-			guard let keyIndex = documentKeyIndexes[$0.key] else { return nil }
-			return ($0.key, CoseKeyPrivate(privateKeyId: $0.key, index: keyIndex, secureArea: SecureAreaRegistry.shared.get(name: dki.secureAreaName)))
-		})
+        let privateKeyObjects: [String: CoseKeyPrivate] = try await MdocHelpers.getPrivateKeys(docKeyInfos, documentKeyIndexes)
 		let serializedOrigin = originUrl.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
 		let dcapiInfo = CBOR.array([.utf8String(eiBase64Url), .utf8String(serializedOrigin)])
 		let dcapiInfoHash = Self.sha256(data: Data(dcapiInfo.encode()))

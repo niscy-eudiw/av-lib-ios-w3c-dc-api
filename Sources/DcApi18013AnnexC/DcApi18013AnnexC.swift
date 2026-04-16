@@ -57,7 +57,14 @@ public actor DcApiHandler {
 	public func validateConsistency(request: ISO18013MobileDocumentRequest, rawRequest: IdentityDocumentWebPresentmentRawRequest) async throws {
 	}
 	
-	public func validateRawRequest(rawRequest: IdentityDocumentWebPresentmentRawRequest) async throws {
+	public func validateRawRequest(rawRequest: IdentityDocumentWebPresentmentRawRequest) async throws -> [DocClaimsModel] {
+		let requestedElementsByDocType = try Self.requestedElementsByDocType(from: rawRequest)
+		if documents.isEmpty { try await loadIssuedCborDocuments() }
+		return try documents.compactMap { document in
+			guard let requestedElements = requestedElementsByDocType[document.docType] else { return nil }
+			let model = try Self.makeFilteredModel(for: document, requestedElements: requestedElements)
+			return model.docClaims.isEmpty ? nil : model
+		}
 	}
 
 	public func buildAndEncryptResponse(remoteRawRequest: DcApiExtensionRequest, zkSystemRepository: ZkSystemRepository?) async throws -> Data {
@@ -88,7 +95,7 @@ public actor DcApiHandler {
 		guard idsToDocData.count > 0 else { throw MdocHelpers.makeError(code: .documents_not_provided) }
 		let docMetadata = Dictionary(uniqueKeysWithValues: idsToDocData.map(\.metadata)).compactMapValues {$0}
 		let issuerSigned = try docData.mapValues { try IssuerSigned(data: $0.bytes)}
-        let privateKeyObjects: [String: CoseKeyPrivate] = try await MdocHelpers.getPrivateKeys(docKeyInfos, documentKeyIndexes)
+        let privateKeyObjects: [String: CoseKeyPrivate] = try await Self.getPrivateKeys(docKeyInfos, documentKeyIndexes)
 		let serializedOrigin = originUrl.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
 		let dcapiInfo = CBOR.array([.utf8String(eiBase64Url), .utf8String(serializedOrigin)])
 		let dcapiInfoHash = Self.sha256(data: Data(dcapiInfo.encode()))
@@ -151,7 +158,89 @@ public actor DcApiHandler {
 			let hashed = SHA256.hash(data: data)
 			return Data(hashed)
 	}
+
+	public static func getPrivateKeys(_ docKeyInfos: [String: Data?], _ documentKeyIndexes: [String: Int]) async throws -> [String: CoseKeyPrivate] {
+		let privateKeyObjects: [String: CoseKeyPrivate] = try await Dictionary(uniqueKeysWithValues: docKeyInfos.asyncCompactMap {
+			guard let dki = DocKeyInfo(from: $0.value), let keyIndex = documentKeyIndexes[$0.key] else { throw MdocHelpers.makeError(code: .unexpected_error) }
+			let secureArea = SecureAreaRegistry.shared.get(name: dki.secureAreaName)
+			let coseKeyPrivate = CoseKeyPrivate(privateKeyId: $0.key, index: keyIndex, secureArea: secureArea)
+			return ($0.key, coseKeyPrivate)
+		})
+		return privateKeyObjects
+	}
+
+	static func requestedElementsByDocType(from rawRequest: IdentityDocumentWebPresentmentRawRequest) throws -> [DocType: [NameSpace: Set<DataElementIdentifier>]] {
+		guard
+			let jsonRequest = try? JSONSerialization.jsonObject(with: rawRequest.requestData) as? [String: String],
+			let dReqBase64Url = jsonRequest["deviceRequest"],
+			let deviceRequestData = Data(base64urlEncoded: dReqBase64Url)
+		else {
+			throw MdocHelpers.makeError(code: .requestDecodeError)
+		}
+
+		let deviceRequest = try DeviceRequest(data: [UInt8](deviceRequestData))
+		var requestedElementsByDocType: [DocType: [NameSpace: Set<DataElementIdentifier>]] = [:]
+
+		for docRequest in deviceRequest.docRequests {
+			let itemsRequest = docRequest.itemsRequest
+			var requestedElementsByNamespace = requestedElementsByDocType[itemsRequest.docType] ?? [:]
+			for (nameSpace, requestDataElements) in itemsRequest.requestNameSpaces.nameSpaces {
+				var requestedElements = requestedElementsByNamespace[nameSpace] ?? []
+				requestedElements.formUnion(requestDataElements.elementIdentifiers)
+				requestedElementsByNamespace[nameSpace] = requestedElements
+			}
+			requestedElementsByDocType[itemsRequest.docType] = requestedElementsByNamespace
+		}
+
+		return requestedElementsByDocType
+	}
+
+	static func makeFilteredModel(for document: WalletStorage.Document, requestedElements: [NameSpace: Set<DataElementIdentifier>]) throws -> DocClaimsModel {
+		let issuerSigned = try IssuerSigned(data: document.data.bytes)
+		let metadata = DocMetadata(from: document.metadata)
+		let docKeyInfo = DocKeyInfo(from: document.docKeyInfo)
+		let matchingClaims = filter(docClaims: documentClaims(from: issuerSigned), requestedElements: requestedElements)
+		let matchingNamespaces = requestedElements.keys.filter { namespace in
+			matchingClaims.contains(where: { $0.namespace == namespace })
+		}
+
+		return DocClaimsModel(
+			configuration: DocClaimsModelConfiguration(
+				id: document.id,
+				createdAt: document.createdAt,
+				docType: document.docType,
+				displayName: document.displayName ?? metadata?.getDisplayName(nil),
+				display: metadata?.display,
+				issuerDisplay: metadata?.issuerDisplay,
+				credentialIssuerIdentifier: metadata?.credentialIssuerIdentifier,
+				configurationIdentifier: metadata?.configurationIdentifier,
+				validFrom: issuerSigned.validFrom,
+				validUntil: issuerSigned.validUntil,
+				statusIdentifier: issuerSigned.issuerAuth.statusIdentifier,
+				credentialsUsageCounts: nil,
+				credentialPolicy: docKeyInfo?.credentialPolicy ?? metadata?.credentialOptions?.credentialPolicy ?? .rotateUse,
+				secureAreaName: docKeyInfo?.secureAreaName ?? metadata?.keyOptions?.secureAreaName,
+				modifiedAt: document.modifiedAt,
+				docClaims: matchingClaims,
+				docDataFormat: document.docDataFormat,
+				hashingAlg: nil,
+				nameSpaces: matchingNamespaces
+			)
+		)
+	}
+
+	static func documentClaims(from issuerSigned: IssuerSigned) -> [DocClaim] {
+		guard let nameSpaceItems = DocClaimsModel.getCborSignedItems(issuerSigned) else { return [] }
+		var docClaims: [DocClaim] = []
+		DocClaimsModel.extractCborClaims(nameSpaceItems, &docClaims, nil, nil)
+		return docClaims
+	}
+
+	static func filter(docClaims: [DocClaim], requestedElements: [NameSpace: Set<DataElementIdentifier>]) -> [DocClaim] {
+		docClaims.filter { claim in
+			guard let namespace = claim.namespace, let elements = requestedElements[namespace] else { return false }
+			return elements.contains(claim.name)
+		}
+	}
 	
 }
-
-

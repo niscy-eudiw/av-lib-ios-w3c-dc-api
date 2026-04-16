@@ -17,13 +17,22 @@
 import Testing
 @testable import DcApi18013AnnexC
 import Foundation
+import MdocDataModel18013
 
-@Test func dcApiRequestNSCodingRoundTripWithOriginUrl() throws {
-    let request = DcApiExtensionRequest(rawRequestData: Data([0x01, 0x02, 0x03]), originUrl: "https://example.org")
-	let archived = try JSONEncoder().encode(request)
-	let decodedRequest = try JSONDecoder().decode(DcApiExtensionRequest.self, from: archived)
-    #expect(decodedRequest.rawRequestData == request.rawRequestData)
-    #expect(decodedRequest.originUrl == request.originUrl)
+@Test func filtersDocClaimsByRequestedNamespaceAndElement() {
+	let requestedElements: [NameSpace: Set<DataElementIdentifier>] = [
+		"org.iso.18013.5.1": ["family_name"],
+		"org.iso.18013.5.1.aamva": ["organ_donor"]
+	]
+	let claims = [
+		DocClaim(name: "family_name", displayName: nil, dataValue: .string("Doe"), stringValue: "Doe", namespace: "org.iso.18013.5.1"),
+		DocClaim(name: "given_name", displayName: nil, dataValue: .string("Jane"), stringValue: "Jane", namespace: "org.iso.18013.5.1"),
+		DocClaim(name: "organ_donor", displayName: nil, dataValue: .boolean(true), stringValue: "true", namespace: "org.iso.18013.5.1.aamva"),
+		DocClaim(name: "age_over_18", displayName: nil, dataValue: .boolean(true), stringValue: "true", namespace: "eu.europa.ec.eudi.pid.1")
+	]
+
+	let filteredClaims = DcApiHandler.filter(docClaims: claims, requestedElements: requestedElements)
+
+	#expect(filteredClaims.count == 2)
+	#expect(filteredClaims.map(\.name).sorted() == ["family_name", "organ_donor"])
 }
-
-

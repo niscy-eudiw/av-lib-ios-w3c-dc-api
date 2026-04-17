@@ -92,7 +92,7 @@ public actor DcApiHandler {
 		guard idsToDocData.count > 0 else { throw MdocHelpers.makeError(code: .documents_not_provided) }
 		let docMetadata = Dictionary(uniqueKeysWithValues: idsToDocData.map(\.metadata)).compactMapValues {$0}
 		let issuerSigned = try docData.mapValues { try IssuerSigned(data: $0.bytes)}
-        let privateKeyObjects: [String: CoseKeyPrivate] = try await Self.getPrivateKeys(docKeyInfos, documentKeyIndexes)
+        let privateKeyObjects: [String: CoseKeyPrivate] = try await MdocHelpers.getPrivateKeys(docKeyInfos, documentKeyIndexes)
 		let serializedOrigin = originUrl.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
 		let dcapiInfo = CBOR.array([.utf8String(eiBase64Url), .utf8String(serializedOrigin)])
 		let dcapiInfoHash = Self.sha256(data: Data(dcapiInfo.encode()))
@@ -154,16 +154,6 @@ public actor DcApiHandler {
 	public static func sha256(data: Data) -> Data {
 			let hashed = SHA256.hash(data: data)
 			return Data(hashed)
-	}
-
-	public static func getPrivateKeys(_ docKeyInfos: [String: Data?], _ documentKeyIndexes: [String: Int]) async throws -> [String: CoseKeyPrivate] {
-		let privateKeyObjects: [String: CoseKeyPrivate] = try await Dictionary(uniqueKeysWithValues: docKeyInfos.asyncCompactMap {
-			guard let dki = DocKeyInfo(from: $0.value), let keyIndex = documentKeyIndexes[$0.key] else { throw MdocHelpers.makeError(code: .unexpected_error) }
-			let secureArea = SecureAreaRegistry.shared.get(name: dki.secureAreaName)
-			let coseKeyPrivate = CoseKeyPrivate(privateKeyId: $0.key, index: keyIndex, secureArea: secureArea)
-			return ($0.key, coseKeyPrivate)
-		})
-		return privateKeyObjects
 	}
 
 	static func requestedElementsByDocType(documentRequestSet: ISO18013MobileDocumentRequest.DocumentRequestSet) throws -> [DocType: [NameSpace: Set<DataElementIdentifier>]] {

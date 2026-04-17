@@ -28,7 +28,7 @@ import SwiftHPKE
 public actor DcApiHandler {
 	let storage: KeyChainStorageService
 	var documents: [WalletStorage.Document] = []
-	
+
 	public init(serviceName: String, accessGroup: String) {
 		storage = KeyChainStorageService(serviceName: serviceName, accessGroup: accessGroup)
 		// register default secure areas
@@ -36,8 +36,8 @@ public actor DcApiHandler {
 		if SecureEnclave.isAvailable { SecureAreaRegistry.shared.register(secureArea: SecureEnclaveSecureArea.create(storage: kcSks)) }
 		SecureAreaRegistry.shared.register(secureArea: SoftwareSecureArea.create(storage: kcSks))
 	}
-	
-	public func validateRequest(_ request: ISO18013MobileDocumentRequest) async throws -> (ISO18013MobileDocumentRequest.DocumentRequestSet, [UInt8], String?) {
+
+	public func validateRequest(_ request: ISO18013MobileDocumentRequest) async throws -> ([DocClaimsModel], ISO18013MobileDocumentRequest.DocumentRequestSet, [UInt8], String?) {
 		var rn: String?
 		var kid: [UInt8] = []
 		// else {  throw MdocHelpers.makeError(code: .noDocumentToReturn, str: "No authentication certification chain") }
@@ -51,20 +51,17 @@ public actor DcApiHandler {
 		let drFind: ([ISO18013MobileDocumentRequest.DocumentRequestSet]) -> ISO18013MobileDocumentRequest.DocumentRequestSet? = { drs in drs.first(where: reqFind) }
 		let prSet = request.presentmentRequests.filter({ pr in pr.isMandatory && drFind(pr.documentRequestSets) != nil })
 		guard let pr = prSet.first, let drs = drFind(pr.documentRequestSets), !drs.requests.isEmpty else { throw MdocHelpers.makeError(code: .documents_not_provided) }
-		return (drs, kid, rn)
-	}
-	
-	public func validateConsistency(request: ISO18013MobileDocumentRequest, rawRequest: IdentityDocumentWebPresentmentRawRequest) async throws {
-	}
-	
-	public func validateRawRequest(rawRequest: IdentityDocumentWebPresentmentRawRequest) async throws -> [DocClaimsModel] {
-		let requestedElementsByDocType = try Self.requestedElementsByDocType(from: rawRequest)
-		if documents.isEmpty { try await loadIssuedCborDocuments() }
-		return try documents.compactMap { document in
+		let requestedElementsByDocType = try Self.requestedElementsByDocType(documentRequestSet: drs)
+		let docClaimsModels: [DocClaimsModel] = try documents.compactMap { document in
 			guard let requestedElements = requestedElementsByDocType[document.docType] else { return nil }
 			let model = try Self.makeFilteredModel(for: document, requestedElements: requestedElements)
 			return model.docClaims.isEmpty ? nil : model
 		}
+		return (docClaimsModels, drs, kid, rn)
+	}
+
+	// proposed function in the wwdc video, to be implemented
+	public func validateConsistency(request: ISO18013MobileDocumentRequest, rawRequest: IdentityDocumentWebPresentmentRawRequest) async throws {
 	}
 
 	public func buildAndEncryptResponse(remoteRawRequest: DcApiExtensionRequest, zkSystemRepository: ZkSystemRepository?) async throws -> Data {
@@ -72,7 +69,7 @@ public actor DcApiHandler {
 		let originUrl = remoteRawRequest.originUrl
 		return try await buildAndEncryptResponse(rawRequest: rawRequest, originUrl: originUrl, zkSystemRepository: zkSystemRepository)
 	}
-	
+
     public func buildAndEncryptResponse(rawRequest: IdentityDocumentWebPresentmentRawRequest, originUrl: String?, zkSystemRepository: ZkSystemRepository? = nil) async throws -> Data {
 		guard let originUrl, let jsonRequest = try? JSONSerialization.jsonObject(with: rawRequest.requestData) as? [String: String], let dReqBase64Url = jsonRequest["deviceRequest"], let deviceRequestData = Data(base64urlEncoded: dReqBase64Url),
 			let eiBase64Url = jsonRequest["encryptionInfo"], let eiData = Data(base64urlEncoded: eiBase64Url), let eiCbor = try? CBOR.decode([UInt8](eiData)) else { throw MdocHelpers.makeError(code: .requestDecodeError) }
@@ -116,7 +113,7 @@ public actor DcApiHandler {
 		let encryptedResponse = CBOR.array([.utf8String("dcapi"), encryptedResponseData])
 		return Data(encryptedResponse.encode())
 	}
-	
+
 	/// Updates key batch info for presented documents to track one-time-use credential consumption
 	/// - Parameters:
 	///   - presentedIds: Array of document IDs that were presented
@@ -153,7 +150,7 @@ public actor DcApiHandler {
 		let (enc, cipherText) = try! theSuite.seal(publicKey: recipientPublicKey, info: info.bytes, pt: plainText.bytes, aad: [])
 		return [Data(enc), Data(cipherText)]
 	}
-	
+
 	public static func sha256(data: Data) -> Data {
 			let hashed = SHA256.hash(data: data)
 			return Data(hashed)
@@ -169,29 +166,17 @@ public actor DcApiHandler {
 		return privateKeyObjects
 	}
 
-	static func requestedElementsByDocType(from rawRequest: IdentityDocumentWebPresentmentRawRequest) throws -> [DocType: [NameSpace: Set<DataElementIdentifier>]] {
-		guard
-			let jsonRequest = try? JSONSerialization.jsonObject(with: rawRequest.requestData) as? [String: String],
-			let dReqBase64Url = jsonRequest["deviceRequest"],
-			let deviceRequestData = Data(base64urlEncoded: dReqBase64Url)
-		else {
-			throw MdocHelpers.makeError(code: .requestDecodeError)
-		}
-
-		let deviceRequest = try DeviceRequest(data: [UInt8](deviceRequestData))
+	static func requestedElementsByDocType(documentRequestSet: ISO18013MobileDocumentRequest.DocumentRequestSet) throws -> [DocType: [NameSpace: Set<DataElementIdentifier>]] {
 		var requestedElementsByDocType: [DocType: [NameSpace: Set<DataElementIdentifier>]] = [:]
-
-		for docRequest in deviceRequest.docRequests {
-			let itemsRequest = docRequest.itemsRequest
-			var requestedElementsByNamespace = requestedElementsByDocType[itemsRequest.docType] ?? [:]
-			for (nameSpace, requestDataElements) in itemsRequest.requestNameSpaces.nameSpaces {
+		for docRequest in documentRequestSet.requests {
+			var requestedElementsByNamespace = requestedElementsByDocType[docRequest.documentType] ?? [:]
+			for (nameSpace, elementInfoByIdentifier) in docRequest.namespaces {
 				var requestedElements = requestedElementsByNamespace[nameSpace] ?? []
-				requestedElements.formUnion(requestDataElements.elementIdentifiers)
+				requestedElements.formUnion(elementInfoByIdentifier.keys)
 				requestedElementsByNamespace[nameSpace] = requestedElements
 			}
-			requestedElementsByDocType[itemsRequest.docType] = requestedElementsByNamespace
+			requestedElementsByDocType[docRequest.documentType] = requestedElementsByNamespace
 		}
-
 		return requestedElementsByDocType
 	}
 
@@ -203,30 +188,7 @@ public actor DcApiHandler {
 		let matchingNamespaces = requestedElements.keys.filter { namespace in
 			matchingClaims.contains(where: { $0.namespace == namespace })
 		}
-
-		return DocClaimsModel(
-			configuration: DocClaimsModelConfiguration(
-				id: document.id,
-				createdAt: document.createdAt,
-				docType: document.docType,
-				displayName: document.displayName ?? metadata?.getDisplayName(nil),
-				display: metadata?.display,
-				issuerDisplay: metadata?.issuerDisplay,
-				credentialIssuerIdentifier: metadata?.credentialIssuerIdentifier,
-				configurationIdentifier: metadata?.configurationIdentifier,
-				validFrom: issuerSigned.validFrom,
-				validUntil: issuerSigned.validUntil,
-				statusIdentifier: issuerSigned.issuerAuth.statusIdentifier,
-				credentialsUsageCounts: nil,
-				credentialPolicy: docKeyInfo?.credentialPolicy ?? metadata?.credentialOptions?.credentialPolicy ?? .rotateUse,
-				secureAreaName: docKeyInfo?.secureAreaName ?? metadata?.keyOptions?.secureAreaName,
-				modifiedAt: document.modifiedAt,
-				docClaims: matchingClaims,
-				docDataFormat: document.docDataFormat,
-				hashingAlg: nil,
-				nameSpaces: matchingNamespaces
-			)
-		)
+		return DocClaimsModel(configuration: DocClaimsModelConfiguration(id: document.id, createdAt: document.createdAt, docType: document.docType, displayName: document.displayName ?? metadata?.getDisplayName(nil), display: metadata?.display, issuerDisplay: metadata?.issuerDisplay, credentialIssuerIdentifier: metadata?.credentialIssuerIdentifier, configurationIdentifier: metadata?.configurationIdentifier, validFrom: issuerSigned.validFrom, validUntil: issuerSigned.validUntil, statusIdentifier: issuerSigned.issuerAuth.statusIdentifier, credentialsUsageCounts: nil, credentialPolicy: docKeyInfo?.credentialPolicy ?? metadata?.credentialOptions?.credentialPolicy ?? .rotateUse, secureAreaName: docKeyInfo?.secureAreaName ?? metadata?.keyOptions?.secureAreaName, modifiedAt: document.modifiedAt, docClaims: matchingClaims, docDataFormat: document.docDataFormat, hashingAlg: nil, nameSpaces: matchingNamespaces))
 	}
 
 	static func documentClaims(from issuerSigned: IssuerSigned) -> [DocClaim] {
@@ -242,5 +204,5 @@ public actor DcApiHandler {
 			return elements.contains(claim.name)
 		}
 	}
-	
+
 }

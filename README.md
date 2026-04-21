@@ -42,6 +42,7 @@ import WalletStorage
 struct RequestAuthorizationView: View {
 	let context: ISO18013MobileDocumentRequestContext
 	let dcApiHandler: DcApiHandler
+	@State var availableClaims: [DocClaimsModel] = []
 	@State var websiteName: String?
 	@State var requestSet: ISO18013MobileDocumentRequest.DocumentRequestSet?
 	@State var errorMessage: String?
@@ -50,6 +51,9 @@ struct RequestAuthorizationView: View {
 		VStack(alignment: .center) {
 			if let requestSet, let websiteName {
 				Text(websiteName).font(.headline).padding(.bottom, 6)
+				Text("Matching credentials: \(availableClaims.count)")
+					.font(.subheadline)
+					.foregroundStyle(.secondary)
 				List {
 					VStack(alignment: .leading) {
 						ForEach(requestSet.requests, id: \.documentType) { rs in
@@ -59,8 +63,15 @@ struct RequestAuthorizationView: View {
 								Text(ns).font(.title2)
 								let elements = Array(rs.namespaces[ns]!.keys)
 								ForEach(elements, id: \.self) { el in
-									Text(el).fontWeight(
-										rs.namespaces[ns]![el]!.isRetaining ? .bold : .thin)
+									VStack(alignment: .leading, spacing: 2) {
+										Text(el).fontWeight(
+											rs.namespaces[ns]![el]!.isRetaining ? .bold : .thin)
+										if let claim = claim(for: rs.documentType, namespace: ns, element: el) {
+											Text("\(claim.displayName ?? claim.name): \(claim.stringValue)")
+												.font(.subheadline)
+												.foregroundStyle(.secondary)
+										}
+									}
 								}
 							}
 						}
@@ -88,9 +99,10 @@ struct RequestAuthorizationView: View {
 		}.padding() // vstack
 		.task {
 			do {
-				let (set, _, rn) = try await dcApiHandler.validateRequest(context.request)
+				let (claims, set, _, readerName) = try await dcApiHandler.validateRequest(context.request)
+				availableClaims = claims
 				requestSet = set
-				websiteName = context.requestingWebsiteOrigin?.absoluteString ?? rn ?? 
+				websiteName = context.requestingWebsiteOrigin?.absoluteString ?? readerName ?? 
 				"Website name not available"
 			} catch {
 				errorMessage = String(describing: error)
@@ -101,16 +113,23 @@ struct RequestAuthorizationView: View {
 	func acceptVerification() async throws {
 		try await context.sendResponse { rawRequest in
 			try await dcApiHandler.validateConsistency(request: context.request, rawRequest: rawRequest)
-			// validate the signatures
-			try await dcApiHandler.validateRawRequest(rawRequest: rawRequest)
 			let responseData = try await dcApiHandler.buildAndEncryptResponse(
 				rawRequest: rawRequest,
 				originUrl: context.requestingWebsiteOrigin?.absoluteString)
 			return ISO18013MobileDocumentResponse(responseData: responseData)
 		}
 	}
+
+	private func claim(for documentType: String, namespace: String, element: String) -> DocClaim? {
+		availableClaims
+			.first(where: { $0.docType == documentType })?
+			.docClaims
+			.first(where: { $0.namespace == namespace && $0.name == element })
+	}
 } // end view
 ```
+
+`validateRequest(_:)` now returns four values in this order: filtered `DocClaimsModel` values for locally available credentials, the matched `DocumentRequestSet`, the authority key identifier extracted from the reader certificate chain when present, and the reader name derived from that chain. The example above uses the filtered claims and matched request set, and ignores the authority key identifier.
 
 ## Dependencies
 

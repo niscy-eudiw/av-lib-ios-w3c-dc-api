@@ -14,19 +14,9 @@
  * limitations under the License.
  */
 import Foundation
+import MdocDataModel18013
 
 public extension Sequence {
-  func asyncMap<T>(
-    _ transform: (Element) async throws -> T
-  ) async rethrows -> [T] {
-    var values = [T]()
-    
-    for element in self {
-      try await values.append(transform(element))
-    }
-    
-    return values
-  }
   
   func asyncCompactMap<T>(
     _ transform: @Sendable (Element) async throws -> T?
@@ -41,4 +31,15 @@ public extension Sequence {
     
     return values
   }
+}
+
+extension Array where Element == DocClaimMetadata {
+    func convertToCborClaimMetadata(_ uiCulture: String?) -> (displayNames: [NameSpace: [String: String]], mandatory: [NameSpace: [String: Bool]]) {
+        guard allSatisfy({ $0.claimPath.count > 1 }) else { return ([:], [:]) } // sanity check
+        let dictNs = Dictionary(grouping: self, by: { $0.claimPath[0]})
+        let dictNsAndKeys = dictNs.mapValues { Dictionary(grouping: $0, by: { $0.claimPath[1]}) } // group by namespace and key
+        let displayNames = dictNsAndKeys.mapValues { nsv in nsv.compactMapValues { kv in kv.first?.display?.getName(uiCulture) } }
+        let mandatory = dictNsAndKeys.mapValues { nsv in nsv.compactMapValues { kv in kv.first?.isMandatory } }
+        return (displayNames, mandatory)
+    }
 }

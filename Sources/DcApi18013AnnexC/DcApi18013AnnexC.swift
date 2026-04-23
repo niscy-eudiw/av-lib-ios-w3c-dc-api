@@ -184,17 +184,18 @@ public actor DcApiHandler {
 		let issuerSigned = try IssuerSigned(data: document.data.bytes)
 		let metadata = DocMetadata(from: document.metadata)
 		let docKeyInfo = DocKeyInfo(from: document.docKeyInfo)
-		let matchingClaims = filter(docClaims: documentClaims(from: issuerSigned), requestedElements: requestedElements)
+        let matchingClaims = filter(docClaims: documentClaims(from: issuerSigned, metadata: metadata), requestedElements: requestedElements)
 		let matchingNamespaces = requestedElements.keys.filter { namespace in
 			matchingClaims.contains(where: { $0.namespace == namespace })
 		}
 		return DocClaimsModel(configuration: DocClaimsModelConfiguration(id: document.id, createdAt: document.createdAt, docType: document.docType, displayName: document.displayName ?? metadata?.getDisplayName(nil), display: metadata?.display, issuerDisplay: metadata?.issuerDisplay, credentialIssuerIdentifier: metadata?.credentialIssuerIdentifier, configurationIdentifier: metadata?.configurationIdentifier, validFrom: issuerSigned.validFrom, validUntil: issuerSigned.validUntil, statusIdentifier: issuerSigned.issuerAuth.statusIdentifier, credentialsUsageCounts: nil, credentialPolicy: docKeyInfo?.credentialPolicy ?? metadata?.credentialOptions?.credentialPolicy ?? .rotateUse, secureAreaName: docKeyInfo?.secureAreaName ?? metadata?.keyOptions?.secureAreaName, modifiedAt: document.modifiedAt, docClaims: matchingClaims, docDataFormat: document.docDataFormat, hashingAlg: nil, nameSpaces: matchingNamespaces))
 	}
 
-	static func documentClaims(from issuerSigned: IssuerSigned) -> [DocClaim] {
+    static func documentClaims(from issuerSigned: IssuerSigned, metadata: DocMetadata?) -> [DocClaim] {
 		guard let nameSpaceItems = DocClaimsModel.getCborSignedItems(issuerSigned) else { return [] }
 		var docClaims: [DocClaim] = []
-		DocClaimsModel.extractCborClaims(nameSpaceItems, &docClaims, nil, nil)
+        let cmd = metadata?.claims?.convertToCborClaimMetadata(nil)
+        DocClaimsModel.extractCborClaims(nameSpaceItems, &docClaims, cmd?.displayNames, cmd?.mandatory)
 		return docClaims
 	}
 

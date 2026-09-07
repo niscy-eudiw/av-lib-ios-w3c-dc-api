@@ -55,6 +55,23 @@ public actor DcApiHandler {
 		SecureAreaRegistry.shared.register(secureArea: SoftwareSecureArea.create(storage: kcSks))
 	}
 
+	/// Uses a SwiftData store located in the given app group container, shared with the wallet app.
+	public init(serviceName: String, accessGroup: String, appGroup: String, transactionLogger: (any TransactionLogger)? = nil) throws {
+		let schema = Schema([SwiftDataStoredDocument.self])
+		let configuration = ModelConfiguration(schema: schema, groupContainer: .identifier(appGroup))
+		let modelContainer = try ModelContainer(for: schema, configurations: [configuration])
+		self.storage = SwiftDataStorageService(modelContainer: modelContainer)
+		Self.registerDefaultSecureAreas(serviceName: serviceName, accessGroup: accessGroup)
+		self.transactionLogger = transactionLogger
+	}
+
+	/// Uses a SwiftData store located in the given model container.
+	public init(serviceName: String, accessGroup: String, modelContainer: ModelContainer, transactionLogger: (any TransactionLogger)? = nil) throws {
+		self.storage = SwiftDataStorageService(modelContainer: modelContainer)
+		Self.registerDefaultSecureAreas(serviceName: serviceName, accessGroup: accessGroup)
+		self.transactionLogger = transactionLogger
+	}
+
 	public func validateRequest(_ request: ISO18013MobileDocumentRequest) async throws -> ([DocClaimsModel], ISO18013MobileDocumentRequest.DocumentRequestSet, [UInt8], String?) {
 		var rn: String?
 		var kid: [UInt8] = []
